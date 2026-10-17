@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Chat demo — Arpan Bom</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f3efe6;
+      --ink: #1c1915;
+      --muted: #6d645b;
+      --line: #ddd4c6;
+      --panel: #fffdf8;
+      --accent: #0f5c56;
+      --accent-ink: #f7fffd;
+      --warn: #8a3d2f;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font: 15px/1.45 "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+      color: var(--ink);
+      background: var(--bg);
+    }
+    header, footer {
+      padding: 14px 20px;
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: baseline;
+    }
+    header { border-bottom: 1px solid var(--line); }
+    footer { border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
+    h1 { font-size: 20px; margin: 0; font-weight: 600; letter-spacing: 0.01em; }
+    main {
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      min-height: calc(100vh - 108px);
+    }
+    aside, section { padding: 16px; }
+    aside { border-right: 1px solid var(--line); background: #efe9dd; }
+    label { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
+    input, button {
+      font: inherit;
+      color: inherit;
+    }
+    input {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: 4px;
+    }
+    button {
+      border: 0;
+      background: var(--accent);
+      color: var(--accent-ink);
+      border-radius: 4px;
+      padding: 8px 12px;
+      cursor: pointer;
+    }
+    button.secondary { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+    button:disabled { opacity: 0.45; cursor: default; }
+    .row { display: flex; gap: 8px; margin-top: 10px; }
+    .row button { flex: 1; }
+    .stack { display: flex; gap: 8px; margin-top: 8px; }
+    .stack input { flex: 1; }
+    ul { list-style: none; padding: 0; margin: 12px 0 0; }
+    li button.room {
+      width: 100%;
+      text-align: left;
+      background: transparent;
+      color: inherit;
+      border: 1px solid transparent;
+      margin-bottom: 4px;
+    }
+    li button.room.active { border-color: var(--accent); background: var(--panel); }
+    #log {
+      height: calc(100vh - 280px);
+      overflow: auto;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 12px;
+    }
+    .msg { margin: 0 0 12px; }
+    .msg .meta { color: var(--muted); font-size: 12px; }
+    .msg.mine .who { color: var(--accent); }
+    .seen { color: var(--accent); font-size: 12px; }
+    #typing { min-height: 1.2em; color: var(--muted); font-size: 13px; margin: 8px 0; }
+    .error { color: var(--warn); min-height: 1.2em; font-size: 13px; }
+    .toolbar { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-bottom: 10px; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+    @media (max-width: 800px) {
+      main { grid-template-columns: 1fr; }
+      aside { border-right: 0; border-bottom: 1px solid var(--line); }
+      #log { height: 50vh; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Relay</h1>
+    <div id="status">offline</div>
+  </header>
+  <main>
+    <aside>
+      <form id="auth-form">
+        <label for="username">Username</label>
+        <input id="username" name="username" autocomplete="username" required minlength="3" maxlength="32">
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required minlength="8">
+        <div class="row">
+          <button type="submit">Register</button>
+          <button type="button" id="login" class="secondary">Log in</button>
+        </div>
+      </form>
+      <p class="error" id="auth-error"></p>
+      <div id="session" hidden>
+        <p>Signed in as <strong id="who"></strong></p>
+        <button type="button" id="logout" class="secondary">Log out</button>
+        <label for="room-name">New room</label>
+        <div class="stack">
+          <input id="room-name" maxlength="80" placeholder="general">
+          <button type="button" id="create-room">Create</button>
+        </div>
+        <label for="join-id">Join room id</label>
+        <div class="stack">
+          <input id="join-id" placeholder="uuid">
+          <button type="button" id="join-room">Join</button>
+        </div>
+        <label for="dm-name">Direct message</label>
+        <div class="stack">
+          <input id="dm-name" placeholder="username">
+          <button type="button" id="start-dm">Start</button>
+        </div>
+        <ul id="rooms"></ul>
+      </div>
+    </aside>
+    <section>
+      <div class="toolbar">
+        <div>
+          <strong id="room-title">No room</strong>
+          <div><code id="room-id"></code></div>
+        </div>
+        <div id="online"></div>
+      </div>
+      <button type="button" id="older" class="secondary" hidden>Load older</button>
+      <div id="log" aria-live="polite"></div>
+      <p id="typing"></p>
+      <form id="composer">
+        <div class="stack">
+          <input id="body" maxlength="4000" placeholder="Message" disabled>
+          <button type="submit" id="send" disabled>Send</button>
+        </div>
+      </form>
+      <p class="error" id="room-error"></p>
+    </section>
+  </main>
+  <footer>Portfolio demo by Arpan Bom. Open two sessions to try rooms, direct messages, typing, and read receipts.</footer>
+  <script>
+    const authForm = document.querySelector("#auth-form");
+    const sessionEl = document.querySelector("#session");
+    const statusEl = document.querySelector("#status");
+    const authError = document.querySelector("#auth-error");
+    const roomError = document.querySelector("#room-error");
+    const roomsEl = document.querySelector("#rooms");
+    const logEl = document.querySelector("#log");
+    const whoEl = document.querySelector("#who");
+    const roomTitle = document.querySelector("#room-title");
+    const roomIdEl = document.querySelector("#room-id");
+    const onlineEl = document.querySelector("#online");
+    const typingEl = document.querySelector("#typing");
+    const olderBtn = document.querySelector("#older");
+    const bodyInput = document.querySelector("#body");
+    const sendBtn = document.querySelector("#send");
+
+    let token = sessionStorage.getItem("token") || "";
+    let user = JSON.parse(sessionStorage.getItem("user") || "null");
+    let ws = null;
+    let socketReady = false;
+    let intentionalClose = false;
+    let reconnectAttempt = 0;
+    let reconnectTimer = null;
+    let active = null;
+    let rooms = [];
+    let messages = [];
+    let seen = new Set();
+    let nextCursor = null;
+    let syncing = false;
+    let needsHistory = false;
+    let replayOpen = false;
+    let buffer = [];
+    let online = new Map();
+    let seenThrough = new Map();
+    let typingTimer = null;
+    let typingSent = false;
+
+    function encodeCursor(id) {
+      return btoa(JSON.stringify({ v: 1, id })).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
+    }
+
+    function setStatus(text) {
+      statusEl.textContent = text;
+    }
+
+    function showSession() {
+      const signedIn = Boolean(token && user);
+      authForm.hidden = signedIn;
+      sessionEl.hidden = !signedIn;
+      if (signedIn) whoEl.textContent = user.username;
+      syncComposer();
+    }
+
+    function syncComposer() {
+      const open = Boolean(active && socketReady);
+      bodyInput.disabled = !open;
+      sendBtn.disabled = !open;
+    }
+
+    async function api(path, options = {}) {
+      const headers = { ...(options.headers || {}) };
+      if (options.body) headers["content-type"] = "application/json";
+      if (token) headers.authorization = "Bearer " + token;
+      const response = await fetch(path, { ...options, headers });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error?.message || response.statusText);
+      return data;
+    }
+
+    function saveSession(nextToken, nextUser) {
+      token = nextToken;
+      user = nextUser;
+      sessionStorage.setItem("token", token);
+      sessionStorage.setItem("user", JSON.stringify(user));
+      showSession();
+    }
+
+    function clearSession() {
+      intentionalClose = true;
+      token = "";
+      user = null;
+      sessionStorage.removeItem("token");
+      sessionStorage.removeItem("user");
+      if (ws) ws.close();
+      ws = null;
+      socketReady = false;
+      active = null;
+      rooms = [];
+      clearLog();
+      showSession();
+      renderRooms();
+      setStatus("offline");
+    }
+
+    async function registerOrLogin(path) {
+      authError.textContent = "";
+      const username = document.querySelector("#username").value.trim();
+      const password = document.querySelector("#password").value;
+      const result = await api(path, {
+        method: "POST",
+        body: JSON.stringify({ username, password }),
+      });
+      saveSession(result.token, result.user);
+      await refreshRooms();
+      await connect();
+    }
+
+    async function refreshRooms() {
+      const data = await api("/api/rooms");
+      rooms = data.rooms;
+      renderRooms();
+    }
+
+    function renderRooms() {
+      roomsEl.replaceChildren();
+      for (const room of rooms) {
+        const li = document.createElement("li");
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "room" + (active && active.id === room.id ? " active" : "");
+        button.textContent = (room.kind === "dm" ? "DM " : "# ") + (room.name || room.id);
+        button.addEventListener("click", () => { void openRoom(room); });
+        li.append(button);
+        roomsEl.append(li);
+      }
+    }
+
+    function clearLog() {
+      messages = [];
+      seen = new Set();
+      nextCursor = null;
+      online = new Map();
+      seenThrough = new Map();
+      typingEl.textContent = "";
+      roomTitle.textContent = active ? (active.name || "Direct message") : "No room";
+      roomIdEl.textContent = active ? active.id : "";
+      olderBtn.hidden = true;
+      renderMessages();
+      renderOnline();
+    }
+
+    function renderOnline() {
+      const names = [...online.values()].map((entry) => entry.username);
+      onlineEl.textContent = names.length ? "Online " + names.join(", ") : "";
+    }
+
+    function renderMessages() {
+      const atBottom = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40;
+      logEl.replaceChildren();
+      for (const message of messages) {
+        const item = document.createElement("article");
+        item.className = "msg" + (user && message.senderId === user.id ? " mine" : "");
+        const meta = document.createElement("div");
+        meta.className = "meta";
+        const who = document.createElement("span");
+        who.className = "who";
+        who.textContent = message.username;
+        meta.append(who, " · " + new Date(message.createdAt).toLocaleTimeString());
+        const body = document.createElement("div");
+        body.textContent = message.body;
+        item.append(meta, body);
+        if (user && message.senderId === user.id && isSeen(message.id)) {
+          const flag = document.createElement("div");
+          flag.className = "seen";
+          flag.textContent = "Seen";
+          item.append(flag);
+        }
+        logEl.append(item);
+      }
+      if (atBottom) logEl.scrollTop = logEl.scrollHeight;
+      olderBtn.hidden = !nextCursor;
+    }
+
+    function isSeen(messageId) {
+      for (const cursor of seenThrough.values()) {
+        if (BigInt(messageId) <= BigInt(cursor)) return true;
+      }
+      return false;
+    }
+
+    function addMessage(message) {
+      if (seen.has(message.id)) return;
+      seen.add(message.id);
+      messages.push(message);
+      messages.sort((a, b) => {
+        const left = BigInt(a.id);
+        const right = BigInt(b.id);
+        if (left < right) return -1;
+        if (left > right) return 1;
+        return 0;
+      });
+    }
+
+    function latestId() {
+      const last = messages[messages.length - 1];
+      return last ? last.id : null;
+    }
+
+    function sendFrame(frame) {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      ws.send(JSON.stringify(frame));
+    }
+
+    function startSync() {
+      if (!socketReady || !active) return;
+      syncing = true;
+      buffer = [];
+      replayOpen = false;
+      if (messages.length === 0) {
+        needsHistory = true;
+        sendFrame({ type: "join", roomId: active.id });
+        return;
+      }
+      const afterId = latestId();
+      if (!afterId) {
+        needsHistory = true;
+        sendFrame({ type: "join", roomId: active.id });
+        return;
+      }
+      needsHistory = false;
+      sendFrame({ type: "resume", roomId: active.id, after: encodeCursor(afterId) });
+    }
+
+    function endSync() {
+      syncing = false;
+      const pending = buffer;
+      buffer = [];
+      for (const frame of pending) handleFrame(frame);
+      renderMessages();
+      markReadLatest();
+      syncComposer();
+    }
+
+    async function finishHistory() {
+      if (!active) return;
+      try {
+        const page = await api("/api/rooms/" + active.id + "/messages?limit=30");
+        nextCursor = page.nextCursor;
+        for (const message of page.messages) addMessage(message);
+        const data = await api("/api/rooms/" + active.id + "/receipts");
+        for (const receipt of data.receipts) noteReceipt(receipt);
+      } catch (err) {
+        roomError.textContent = err.message;
+      } finally {
+        endSync();
+      }
+    }
+
+    function noteReceipt(receipt) {
+      if (!user || receipt.userId === user.id) return;
+      const current = seenThrough.get(receipt.userId);
+      if (!current || BigInt(receipt.messageId) > BigInt(current)) {
+        seenThrough.set(receipt.userId, receipt.messageId);
+      }
+    }
+
+    function markReadLatest() {
+      const id = latestId();
+      if (!active || !id) return;
+      sendFrame({ type: "read", roomId: active.id, messageId: id });
+    }
+
+    function setOnline(users) {
+      online = new Map(users.map((entry) => [entry.id, entry]));
+      renderOnline();
+    }
+
+    function handleFrame(frame) {
+      if (frame.type === "ready") {
+        socketReady = true;
+        reconnectAttempt = 0;
+        setStatus("online");
+        syncComposer();
+        startSync();
+        return;
+      }
+      if (frame.type === "error") {
+        roomError.textContent = frame.message;
+        if (frame.code === "unauthorized") intentionalClose = true;
+        return;
+      }
+      if (!active || frame.roomId !== active.id) {
+        if (frame.type === "presence") applyPresence(frame);
+        return;
+      }
+      if (frame.type === "replay") {
+        for (const message of frame.messages) addMessage(message);
+        if (frame.hasMore && frame.messages.length > 0) {
+          replayOpen = true;
+          const last = frame.messages[frame.messages.length - 1];
+          sendFrame({ type: "resume", roomId: frame.roomId, after: encodeCursor(last.id) });
+        } else {
+          replayOpen = false;
+        }
+        renderMessages();
+        return;
+      }
+      if (frame.type === "joined") {
+        setOnline(frame.onlineUsers);
+        if (needsHistory) {
+          needsHistory = false;
+          void finishHistory();
+          return;
+        }
+        if (!replayOpen) endSync();
+        return;
+      }
+      if (frame.type === "message") {
+        addMessage(frame.message);
+        renderMessages();
+        if (frame.message.senderId !== user.id) markReadLatest();
+        return;
+      }
+      if (frame.type === "typing") {
+        typingEl.textContent = frame.isTyping ? frame.username + " is typing" : "";
+        return;
+      }
+      if (frame.type === "read") {
+        noteReceipt(frame);
+        renderMessages();
+        return;
+      }
+      if (frame.type === "presence") applyPresence(frame);
+    }
+
+    function applyPresence(frame) {
+      if (frame.status === "online") online.set(frame.userId, { id: frame.userId, username: frame.username });
+      else online.delete(frame.userId);
+      renderOnline();
+    }
+
+    async function openRoom(room) {
+      roomError.textContent = "";
+      active = room;
+      clearLog();
+      renderRooms();
+      syncComposer();
+      startSync();
+    }
+
+    function scheduleReconnect() {
+      if (intentionalClose || !token) return;
+      const delay = Math.min(5000, 400 * 2 ** reconnectAttempt);
+      reconnectAttempt += 1;
+      setStatus("reconnecting");
+      reconnectTimer = setTimeout(() => { void connect(); }, delay);
+    }
+
+    async function connect() {
+      if (!token) return;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      intentionalClose = false;
+      socketReady = false;
+      setStatus("connecting");
+      try {
+        const issued = await api("/api/ws-ticket", { method: "POST" });
+        const url = location.origin.replace(/^http/, "ws") + "/ws?ticket=" + encodeURIComponent(issued.ticket);
+        const socket = new WebSocket(url);
+        ws = socket;
+        socket.addEventListener("message", (event) => {
+          const frame = JSON.parse(event.data);
+          if (syncing && frame.type === "message") {
+            buffer.push(frame);
+            return;
+          }
+          handleFrame(frame);
+        });
+        socket.addEventListener("close", () => {
+          socketReady = false;
+          syncComposer();
+          if (ws === socket && !intentionalClose) {
+            setStatus("offline");
+            scheduleReconnect();
+          }
+        });
+      } catch (err) {
+        authError.textContent = err.message;
+        scheduleReconnect();
+      }
+    }
+
+    authForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      void registerOrLogin("/api/register").catch((err) => { authError.textContent = err.message; });
+    });
+    document.querySelector("#login").addEventListener("click", () => {
+      void registerOrLogin("/api/login").catch((err) => { authError.textContent = err.message; });
+    });
+    document.querySelector("#logout").addEventListener("click", clearSession);
+    document.querySelector("#create-room").addEventListener("click", () => {
+      const name = document.querySelector("#room-name").value.trim();
+      void api("/api/rooms", { method: "POST", body: JSON.stringify({ name }) })
+        .then(async (data) => {
+          document.querySelector("#room-name").value = "";
+          await refreshRooms();
+          await openRoom(data.room);
+        })
+        .catch((err) => { roomError.textContent = err.message; });
+    });
+    document.querySelector("#join-room").addEventListener("click", () => {
+      const roomId = document.querySelector("#join-id").value.trim();
+      void api("/api/rooms/" + roomId + "/join", { method: "POST" })
+        .then(async (data) => {
+          document.querySelector("#join-id").value = "";
+          await refreshRooms();
+          await openRoom(data.room);
+        })
+        .catch((err) => { roomError.textContent = err.message; });
+    });
+    document.querySelector("#start-dm").addEventListener("click", () => {
+      const username = document.querySelector("#dm-name").value.trim();
+      void api("/api/dm", { method: "POST", body: JSON.stringify({ username }) })
+        .then(async (data) => {
+          document.querySelector("#dm-name").value = "";
+          await refreshRooms();
+          await openRoom(data.room);
+        })
+        .catch((err) => { roomError.textContent = err.message; });
+    });
+    olderBtn.addEventListener("click", () => {
+      if (!active || !nextCursor) return;
+      const previousHeight = logEl.scrollHeight;
+      void api("/api/rooms/" + active.id + "/messages?limit=30&before=" + encodeURIComponent(nextCursor))
+        .then((page) => {
+          nextCursor = page.nextCursor;
+          for (const message of page.messages) addMessage(message);
+          renderMessages();
+          logEl.scrollTop = logEl.scrollHeight - previousHeight;
+        })
+        .catch((err) => { roomError.textContent = err.message; });
+    });
+    document.querySelector("#composer").addEventListener("submit", (event) => {
+      event.preventDefault();
+      const body = bodyInput.value.trim();
+      if (!body || !active) return;
+      sendFrame({
+        type: "message",
+        roomId: active.id,
+        body,
+        clientMsgId: crypto.randomUUID().replaceAll("-", ""),
+      });
+      bodyInput.value = "";
+      if (typingSent) {
+        typingSent = false;
+        sendFrame({ type: "typing", roomId: active.id, isTyping: false });
+      }
+    });
+    bodyInput.addEventListener("input", () => {
+      if (!active) return;
+      if (!typingSent) {
+        typingSent = true;
+        sendFrame({ type: "typing", roomId: active.id, isTyping: true });
+      }
+      if (typingTimer) clearTimeout(typingTimer);
+      typingTimer = setTimeout(() => {
+        typingSent = false;
+        sendFrame({ type: "typing", roomId: active.id, isTyping: false });
+      }, 1200);
+    });
+
+    showSession();
+    if (token && user) {
+      void refreshRooms().then(() => connect()).catch((err) => { authError.textContent = err.message; });
+    }
+  </script>
+</body>
+</html>
