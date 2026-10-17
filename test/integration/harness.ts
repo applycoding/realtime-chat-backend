@@ -12,11 +12,12 @@ export type Auth = {
 };
 
 export function integrationConfig(overrides: Partial<Config> = {}): Config {
-  const secret = process.env.JWT_SECRET;
+  const env = { ...process.env };
+  delete env.PORT;
+  const secret = env.JWT_SECRET;
   return {
     ...loadConfig({
-      ...process.env,
-      PORT: "0",
+      ...env,
       JWT_SECRET: secret && secret.length >= 16 ? secret : "integration-test-secret",
       AUTH_RATE_LIMIT_MAX: "1000",
       MESSAGE_RATE_LIMIT_MAX: "100",
