@@ -30,9 +30,9 @@ before(async () => {
 });
 
 after(async () => {
-  await app.close();
-  await redis.quit();
-  await pool.end();
+  await app?.close();
+  await redis?.quit();
+  await pool?.end();
 });
 
 beforeEach(async () => {
